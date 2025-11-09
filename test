@@ -1,59 +1,97 @@
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UIS = game:GetService("UserInputService")
-local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
-local fovRadius = 85 -- Baguhin kung gusto mo mas malaki/maliit
+-- Services
+local Players        = game:GetService("Players")
+local RunService     = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace      = game:GetService("Workspace")
 
--- FOV Circle (optional)
+local LocalPlayer    = Players.LocalPlayer
+local Camera         = Workspace.CurrentCamera
+
+-- SETTINGS ---------------------------------------------------------
+local FOV_RADIUS     = 85          -- Adjust as you like
+local SNAP_SPEED     = 0.12        -- 0 = instant, 1 = smooth (lerp factor)
+local SHOW_FOV       = false       -- Set true to see the circle on mobile
+-- ------------------------------------------------------------------
+
+-- Optional FOV circle (Drawing API works on mobile)
 local fovCircle = Drawing.new("Circle")
 fovCircle.Thickness = 1
-fovCircle.NumSides = 64
-fovCircle.Filled = false
+fovCircle.NumSides  = 64
+fovCircle.Filled    = false
 fovCircle.Transparency = 1
-fovCircle.Color = Color3.fromRGB(255, 0, 0)
-fovCircle.Visible = true -- Pwede mo i-set false kung ayaw mo makita
-fovCircle.Radius = fovRadius
+fovCircle.Color     = Color3.fromRGB(255,0,0)
+fovCircle.Visible   = SHOW_FOV
+fovCircle.Radius    = FOV_RADIUS
 
--- Kunin ang pinakamalapit na target sa loob ng FOV
-local function getClosestTarget()
+-- Touch state
+local touchActive = false
+local touchId     = nil
+local touchPos    = Vector2.new()
+
+-- Get closest alive enemy head inside FOV
+local function getClosestTarget(screenCenter)
     local closestDist = math.huge
-    local targetPart = nil
-    local mousePos = UIS:GetMouseLocation()
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            local head = player.Character:FindFirstChild("Head")
-            local hum = player.Character:FindFirstChildOfClass("Humanoid")
+    local targetHead  = nil
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            local head = plr.Character:FindFirstChild("Head")
+            local hum  = plr.Character:FindFirstChildOfClass("Humanoid")
             if head and hum and hum.Health > 0 then
                 local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
                 if onScreen then
-                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                    if dist < closestDist and dist <= fovRadius then
+                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                    if dist < closestDist and dist <= FOV_RADIUS then
                         closestDist = dist
-                        targetPart = head
+                        targetHead  = head
                     end
                 end
             end
         end
     end
-    return targetPart
+    return targetHead
 end
 
--- Instant snap to target
-local function snapToTarget(target)
-    local screenPos = Camera:WorldToViewportPoint(target.Position)
-    local mousePos = UIS:GetMouseLocation()
-    local dx = screenPos.X - mousePos.X
-    local dy = screenPos.Y - mousePos.Y
-    mousemoverel(dx, dy) -- Instant move!
+-- Move camera toward world position (mobile-friendly)
+local function lookAtWorldPosition(worldPos)
+    local camCFrame = Camera.CFrame
+    local targetCFrame = CFrame.new(camCFrame.Position, worldPos)
+
+    -- Lerp for smoothness (SNAP_SPEED = 0 → instant)
+    Camera.CFrame = camCFrame:lerp(targetCFrame, SNAP_SPEED)
 end
 
--- Main loop: AUTO AIMBOT (no right-click needed)
+-- Touch handling ----------------------------------------------------
+UserInputService.TouchStarted:Connect(function(input, processed)
+    if processed then return end
+    touchActive = true
+    touchId     = input.TouchId
+    touchPos    = input.Position
+end)
+
+UserInputService.TouchMoved:Connect(function(input, processed)
+    if processed or input.TouchId ~= touchId then return end
+    touchPos = input.Position
+end)
+
+UserInputService.TouchEnded:Connect(function(input, processed)
+    if input.TouchId == touchId then
+        touchActive = false
+        touchId     = nil
+    end
+end)
+
+-- Main loop ---------------------------------------------------------
 RunService.RenderStepped:Connect(function()
-    fovCircle.Position = UIS:GetMouseLocation()
-    
-    local target = getClosestTarget()
-    if target then
-        snapToTarget(target) -- Awtomatikong susundan kahit walang right-click
+    -- Update FOV circle (centered on current touch or screen center)
+    local center = touchActive and touchPos or (Camera.ViewportSize * 0.5)
+    fovCircle.Position = center
+
+    -- Only aim while a finger is on the screen
+    if not touchActive then return end
+
+    local targetHead = getClosestTarget(center)
+    if targetHead then
+        lookAtWorldPosition(targetHead.Position)
     end
 end)
