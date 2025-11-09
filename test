@@ -9,27 +9,23 @@ local Camera         = Workspace.CurrentCamera
 
 -- SETTINGS ---------------------------------------------------------
 local FOV_RADIUS     = 85          -- Adjust as you like
-local SNAP_SPEED     = 0.12        -- 0 = instant, 1 = smooth (lerp factor)
-local SHOW_FOV       = false       -- Set true to see the circle on mobile
+local SNAP_SPEED     = 0.15        -- 0 = instant, 0.1-0.3 = smooth
+local SHOW_FOV       = true        -- Set false kung ayaw mo makita yung circle
 -- ------------------------------------------------------------------
 
 -- Optional FOV circle (Drawing API works on mobile)
 local fovCircle = Drawing.new("Circle")
-fovCircle.Thickness = 1
+fovCircle.Thickness = 2
 fovCircle.NumSides  = 64
 fovCircle.Filled    = false
-fovCircle.Transparency = 1
+fovCircle.Transparency = 0.8
 fovCircle.Color     = Color3.fromRGB(255,0,0)
 fovCircle.Visible   = SHOW_FOV
 fovCircle.Radius    = FOV_RADIUS
 
--- Touch state
-local touchActive = false
-local touchId     = nil
-local touchPos    = Vector2.new()
-
--- Get closest alive enemy head inside FOV
-local function getClosestTarget(screenCenter)
+-- Get closest alive enemy head inside FOV (centered sa gitna ng screen)
+local function getClosestTarget()
+    local screenCenter = Camera.ViewportSize * 0.5
     local closestDist = math.huge
     local targetHead  = nil
 
@@ -61,36 +57,13 @@ local function lookAtWorldPosition(worldPos)
     Camera.CFrame = camCFrame:lerp(targetCFrame, SNAP_SPEED)
 end
 
--- Touch handling ----------------------------------------------------
-UserInputService.TouchStarted:Connect(function(input, processed)
-    if processed then return end
-    touchActive = true
-    touchId     = input.TouchId
-    touchPos    = input.Position
-end)
-
-UserInputService.TouchMoved:Connect(function(input, processed)
-    if processed or input.TouchId ~= touchId then return end
-    touchPos = input.Position
-end)
-
-UserInputService.TouchEnded:Connect(function(input, processed)
-    if input.TouchId == touchId then
-        touchActive = false
-        touchId     = nil
-    end
-end)
-
--- Main loop ---------------------------------------------------------
+-- Main loop - NAKA-ON NA AGAD pag inexecute! -----------------------
 RunService.RenderStepped:Connect(function()
-    -- Update FOV circle (centered on current touch or screen center)
-    local center = touchActive and touchPos or (Camera.ViewportSize * 0.5)
-    fovCircle.Position = center
+    -- FOV circle sa gitna ng screen palagi
+    fovCircle.Position = Camera.ViewportSize * 0.5
 
-    -- Only aim while a finger is on the screen
-    if not touchActive then return end
-
-    local targetHead = getClosestTarget(center)
+    -- Laging naghahanap ng pinakamalapit na target
+    local targetHead = getClosestTarget()
     if targetHead then
         lookAtWorldPosition(targetHead.Position)
     end
