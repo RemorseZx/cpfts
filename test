@@ -1,307 +1,37 @@
--- Mobile-compatible Aimbot + ESP (Desktop & Phone)
--- Put this LocalScript in StarterPlayerScripts (or run with your executor)
--- Notes:
---  - Works with touch (mobile) and mouse/keyboard (desktop).
---  - Uses camera interpolation to aim (no mousemoverel on mobile).
---  - Uses Drawing library for ESP & FOV circle (depends on exploit environment).
+-- Mobile-only simple aimbot (No ESP, smoothing = 1, No GUI)
+-- Place as a LocalScript (e.g. StarterPlayerScripts). Designed for touch devices.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
+
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- Config
+-- Only run on touch devices
+if not UIS.TouchEnabled then
+    warn("This script is configured for mobile (touch) only. Touch not detected — script will not run.")
+    return
+end
+
 local aiming = false
-local espEnabled = true
-local espData = {}
-local fovRadius = 150
-local smoothing = 5        -- current smoothing (lower = faster snap). 0 allowed (fast)
-local smoothingMax = 20   -- slider max (visual)
-local smoothingMin = 0    -- slider min
+local fovRadius = 300 -- pixels radius from screen center to consider targets
+local smoothing = 1 -- fixed as requested
 
--- keep latest input position for FOV circle (works for touch & mouse)
-local lastInputPos = Vector2.new(0, 0)
-
--- UI (ScreenGui under CoreGui to show on top)
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AimbotESP_GUI"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = game:GetService("CoreGui")
-
--- Main panel (draggable)
-local frame = Instance.new("Frame", screenGui)
-frame.Size = UDim2.new(0, 260, 0, 110)
-frame.Position = UDim2.new(0.02, 0, 0.6, 0)
-frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-frame.BorderSizePixel = 0
-frame.Active = true
-frame.Draggable = true
-
-local title = Instance.new("TextLabel", frame)
-title.Size = UDim2.new(1, 0, 0, 20)
-title.Position = UDim2.new(0, 0, 0, 0)
-title.BackgroundTransparency = 1
-title.Text = "Aimbot & ESP"
-title.TextColor3 = Color3.new(1, 1, 1)
-title.Font = Enum.Font.SourceSansBold
-title.TextSize = 16
-
--- Smoothing label
-local label = Instance.new("TextLabel", frame)
-label.Size = UDim2.new(1, -20, 0, 18)
-label.Position = UDim2.new(0, 10, 0, 26)
-label.BackgroundTransparency = 1
-label.Text = "Smoothing: " .. smoothing
-label.TextColor3 = Color3.new(1, 1, 1)
-label.Font = Enum.Font.SourceSans
-label.TextSize = 14
-label.TextXAlignment = Enum.TextXAlignment.Left
-
--- Slider background
-local sliderBg = Instance.new("Frame", frame)
-sliderBg.Size = UDim2.new(1, -20, 0, 20)
-sliderBg.Position = UDim2.new(0, 10, 0, 48)
-sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-sliderBg.BorderSizePixel = 0
-sliderBg.ClipsDescendants = true
-
--- Slider knob
-local sliderKnob = Instance.new("Frame", sliderBg)
-sliderKnob.Size = UDim2.new(math.clamp(smoothing / smoothingMax, 0, 1), 0, 1, 0)
-sliderKnob.Position = UDim2.new(0, 0, 0, 0)
-sliderKnob.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
-sliderKnob.BorderSizePixel = 0
-
--- Aim button (hold-to-aim)
-local aimButton = Instance.new("TextButton", frame)
-aimButton.Size = UDim2.new(0, 120, 0, 26)
-aimButton.Position = UDim2.new(0, 10, 0, 76)
-aimButton.Text = "AIM (Hold)"
-aimButton.Font = Enum.Font.SourceSansBold
-aimButton.TextSize = 14
-aimButton.TextColor3 = Color3.new(1, 1, 1)
-aimButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-aimButton.AutoButtonColor = true
-
--- ESP toggle button
-local espButton = Instance.new("TextButton", frame)
-espButton.Size = UDim2.new(0, 120, 0, 26)
-espButton.Position = UDim2.new(0, 140, 0, 76)
-espButton.Text = "ESP: ON"
-espButton.Font = Enum.Font.SourceSansBold
-espButton.TextSize = 14
-espButton.TextColor3 = Color3.new(1, 1, 1)
-espButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-espButton.AutoButtonColor = true
-
--- Desktop toggle: hide/show UI using RightShift (like original)
-UIS.InputBegan:Connect(function(input, gp)
-    if input.KeyCode == Enum.KeyCode.RightShift then
-        frame.Visible = not frame.Visible
-    end
-end)
-
--- Slider interaction (mouse OR touch) - handle InputBegan/InputChanged/InputEnded
-local dragging = false
-local currentInput = nil
-
-local function setSmoothingFromRel(rel)
-    local perc = math.clamp(rel / sliderBg.AbsoluteSize.X, 0, 1)
-    smoothing = math.floor((smoothingMin + (smoothingMax - smoothingMin) * perc) + 0.5)
-    label.Text = "Smoothing: " .. smoothing
-    sliderKnob.Size = UDim2.new(perc, 0, 1, 0)
-end
-
--- Mouse click on slider (desktop)
-sliderBg.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        currentInput = input
-        local rel = input.Position.X - sliderBg.AbsolutePosition.X
-        setSmoothingFromRel(rel)
-    end
-end)
-
-sliderBg.InputEnded:Connect(function(input)
-    if input == currentInput then
-        dragging = false
-        currentInput = nil
-    end
-end)
-
-sliderBg.InputChanged:Connect(function(input)
-    if dragging and input == currentInput then
-        local rel = input.Position.X - sliderBg.AbsolutePosition.X
-        setSmoothingFromRel(rel)
-    end
-end)
-
--- Touch support on slider (mobile)
-sliderBg.TouchEnabled = true
-sliderBg.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        currentInput = input
-        local rel = input.Position.X - sliderBg.AbsolutePosition.X
-        setSmoothingFromRel(rel)
-    end
-end)
-
-sliderBg.InputChanged:Connect(function(input)
-    if dragging and input == currentInput and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-        local rel = input.Position.X - sliderBg.AbsolutePosition.X
-        setSmoothingFromRel(rel)
-    end
-end)
-
-sliderBg.InputEnded:Connect(function(input)
-    if input == currentInput then
-        dragging = false
-        currentInput = nil
-    end
-end)
-
--- Aim button: hold to aim (touch & mouse)
-aimButton.MouseButton1Down:Connect(function()
-    aiming = true
-end)
-aimButton.MouseButton1Up:Connect(function()
-    aiming = false
-end)
--- touch-specific events (TextButton has TouchStarted / TouchEnded)
-if aimButton.TouchStarted then
-    aimButton.TouchStarted:Connect(function()
-        aiming = true
-    end)
-    aimButton.TouchEnded:Connect(function()
-        aiming = false
-    end)
-end
-
--- ESP toggle
-espButton.MouseButton1Click:Connect(function()
-    espEnabled = not espEnabled
-    espButton.Text = "ESP: " .. (espEnabled and "ON" or "OFF")
-    if not espEnabled then
-        -- remove all esp drawings
-        for p, tbl in pairs(espData) do
-            for _, obj in pairs(tbl) do
-                if obj.Remove then pcall(obj.Remove, obj) end
-            end
-        end
-        espData = {}
-    end
-end)
-
--- Desktop right mouse aim (like original)
-UIS.InputBegan:Connect(function(input, gp)
-    if not gp and input.UserInputType == Enum.UserInputType.MouseButton2 then
-        aiming = true
-    end
-end)
-UIS.InputEnded:Connect(function(input, gp)
-    if not gp and input.UserInputType == Enum.UserInputType.MouseButton2 then
-        aiming = false
-    end
-end)
-
--- track last input position for FOV circle
-UIS.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        lastInputPos = Vector2.new(input.Position.X, input.Position.Y)
-    end
-end)
-UIS.TouchMoved:Connect(function(touchPositions, idx)
-    -- fallback; sometimes TouchMoved is available
-    if touchPositions and #touchPositions > 0 then
-        local tp = touchPositions[1]
-        lastInputPos = Vector2.new(tp.Position.X, tp.Position.Y)
-    end
-end)
-
--- Drawing FOV circle (if Drawing available)
-local fovCircle
-local ok, _ = pcall(function()
-    fovCircle = Drawing.new("Circle")
-end)
-if ok and fovCircle then
-    fovCircle.Thickness = 1
-    fovCircle.NumSides = 100
-    fovCircle.Filled = false
-    fovCircle.Transparency = 1
-    fovCircle.Color = Color3.fromRGB(255, 0, 0)
-    fovCircle.Visible = true
-    fovCircle.Radius = fovRadius
-end
-
--- create ESP drawing objects for player
-local function createESP(player)
-    if not espEnabled then return end
-    if espData[player] then return end
-
-    local box = Drawing.new("Square")
-    box.Color = Color3.fromRGB(255, 0, 0)
-    box.Thickness = 2
-    box.Filled = false
-    box.Transparency = 1
-    box.Visible = false
-
-    local nameTag = Drawing.new("Text")
-    nameTag.Size = 14
-    nameTag.Color = Color3.new(1, 1, 1)
-    nameTag.Center = true
-    nameTag.Outline = true
-    nameTag.Font = 2
-    nameTag.Visible = false
-
-    local healthText = Drawing.new("Text")
-    healthText.Size = 14
-    healthText.Color = Color3.new(1, 0, 0)
-    healthText.Outline = true
-    healthText.Font = 2
-    healthText.Visible = false
-
-    local distanceText = Drawing.new("Text")
-    distanceText.Size = 14
-    distanceText.Color = Color3.new(0, 1, 0)
-    distanceText.Outline = true
-    distanceText.Font = 2
-    distanceText.Visible = false
-
-    espData[player] = {
-        Box = box,
-        Name = nameTag,
-        Health = healthText,
-        Distance = distanceText
-    }
-end
-
-local function removeESP(player)
-    if espData[player] then
-        for _, obj in pairs(espData[player]) do
-            if obj.Remove then
-                pcall(function() obj:Remove() end)
-            end
-        end
-        espData[player] = nil
-    end
-end
-
--- Find closest visible head within FOV (using lastInputPos)
+-- Helper: find closest target to screen center within fovRadius
 local function getClosestTarget()
     local closestDist = math.huge
     local targetPart = nil
-    local mousePos = lastInputPos
+    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 
     for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") and player.Character:FindFirstChildOfClass("Humanoid") then
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
             local head = player.Character.Head
             local hum = player.Character:FindFirstChildOfClass("Humanoid")
             if hum and hum.Health > 0 then
                 local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
                 if onScreen then
-                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
                     if dist < closestDist and dist <= fovRadius then
                         closestDist = dist
                         targetPart = head
@@ -314,97 +44,51 @@ local function getClosestTarget()
     return targetPart
 end
 
--- Smoothly rotate camera to look at target (works on mobile too)
-local function moveCameraTowards(target)
+-- Move "mouse" (cursor) toward target on-screen (uses mousemoverel)
+local function moveMouseTowards(target)
     if not target then return end
-    -- compute lookAt CFrame from current camera position to target
-    local camPos = Camera.CFrame.Position
-    local lookAt = CFrame.new(camPos, target.Position)
-    -- smoothing: bigger smoothing -> slower; convert to alpha between 0..1
-    local denom = (smoothing == 0) and 0.1 or smoothing
-    local alpha = math.clamp(1 / denom, 0, 1) -- smoothing=1 -> alpha=1 (fast), smoothing big -> alpha small
-    Camera.CFrame = Camera.CFrame:Lerp(lookAt, alpha)
+    local screenPos = Camera:WorldToViewportPoint(target.Position)
+    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    -- compute delta and apply smoothing (smoothing = 1 here)
+    local dx = (screenPos.X - screenCenter.X) / (smoothing == 0 and 0.1 or smoothing)
+    local dy = (screenPos.Y - screenCenter.Y) / (smoothing == 0 and 0.1 or smoothing)
+
+    -- mousemoverel moves by relative pixels; many mobile exploit environments still support it.
+    -- If your environment does not support mousemoverel on mobile, this approach will not work.
+    pcall(function()
+        mousemoverel(dx, dy)
+    end)
 end
 
--- Main loop
+-- Touch handlers: single finger hold to aim
+UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.Touch then
+        -- start aiming on touch begin
+        aiming = true
+    end
+end)
+
+UIS.InputEnded:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.Touch then
+        -- stop aiming when touch ends
+        aiming = false
+    end
+end)
+
+-- Main loop: find closest target to screen center and move cursor while aiming
 RunService.RenderStepped:Connect(function()
-    -- update fov circle position
-    if fovCircle then
-        fovCircle.Position = lastInputPos
-        fovCircle.Radius = fovRadius
-    end
-
-    -- Update ESP for players
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Head") then
-            if espEnabled then
-                createESP(player)
-                local data = espData[player]
-                if data then
-                    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-                    local head = player.Character:FindFirstChild("Head")
-                    local hum = player.Character:FindFirstChildOfClass("Humanoid")
-                    if hrp and head and hum and hum.Health > 0 then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
-                        if onScreen then
-                            local scale = (Camera.CFrame.Position - hrp.Position).Magnitude / 25
-                            local boxWidth = math.clamp((head.Size.X + hrp.Size.X) / scale, 8, 2000)
-                            local boxHeight = math.clamp((head.Size.Y + hrp.Size.Y) / scale, 8, 2000)
-                            data.Box.Size = Vector2.new(boxWidth, boxHeight)
-                            data.Box.Position = Vector2.new(screenPos.X - boxWidth / 2, screenPos.Y - boxHeight / 2)
-                            data.Box.Visible = true
-
-                            data.Name.Text = player.Name
-                            data.Name.Position = Vector2.new(screenPos.X, screenPos.Y - boxHeight / 2 - 15)
-                            data.Name.Visible = true
-
-                            data.Health.Text = "HP: " .. math.floor(hum.Health)
-                            data.Health.Position = Vector2.new(screenPos.X + boxWidth / 2 + 15, screenPos.Y)
-                            data.Health.Visible = true
-
-                            local dist = math.floor((Camera.CFrame.Position - hrp.Position).Magnitude)
-                            data.Distance.Text = "Dist: " .. dist
-                            data.Distance.Position = Vector2.new(screenPos.X - boxWidth / 2 - 70, screenPos.Y)
-                            data.Distance.Visible = true
-                        else
-                            data.Box.Visible = false
-                            data.Name.Visible = false
-                            data.Health.Visible = false
-                            data.Distance.Visible = false
-                        end
-                    else
-                        removeESP(player)
-                    end
-                end
-            else
-                -- ensure removed if esp disabled
-                removeESP(player)
-            end
-        else
-            removeESP(player)
-        end
-    end
-
-    -- Aiming behavior
     if aiming then
         local target = getClosestTarget()
         if target then
-            moveCameraTowards(target)
+            moveMouseTowards(target)
         end
     end
 end)
 
--- Cleanup when player leaves
+-- Cleanup on leaving (optional)
 Players.PlayerRemoving:Connect(function(player)
-    removeESP(player)
+    -- no ESP to remove; function kept for completeness
 end)
-
--- Optional: remove drawings when script destroyed / player respawns
-LocalPlayer.CharacterAdded:Connect(function()
-    -- keep existing esp until next loop will recreate; ensure not leaking on respawn
-    for p, _ in pairs(espData) do
-        if not p or not p.Parent then removeESP(p) end
-    end
-end)
-
--- End of script
