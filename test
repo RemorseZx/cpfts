@@ -1,97 +1,59 @@
--- MOBILE + PC AIMBOT (No ESP, No GUI, Smoothing = 1)
--- Put in StarterPlayerScripts or execute in your executor
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
+local fovRadius = 85 -- Baguhin kung gusto mo mas malaki/maliit
 
-local aiming = false
-local fovRadius = 150
-local smoothing = 1
-
-local lastInputPos = Vector2.new(0, 0)
-
--- FOV CIRCLE
+-- FOV Circle (optional)
 local fovCircle = Drawing.new("Circle")
 fovCircle.Thickness = 1
-fovCircle.NumSides = 100
+fovCircle.NumSides = 64
 fovCircle.Filled = false
 fovCircle.Transparency = 1
 fovCircle.Color = Color3.fromRGB(255, 0, 0)
-fovCircle.Visible = true
+fovCircle.Visible = true -- Pwede mo i-set false kung ayaw mo makita
 fovCircle.Radius = fovRadius
 
--- Update touch/mouse position
-UIS.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        lastInputPos = Vector2.new(input.Position.X, input.Position.Y)
-    end
-end)
-
--- PC: Right click hold to aim
-UIS.InputBegan:Connect(function(input, gp)
-    if not gp and input.UserInputType == Enum.UserInputType.MouseButton2 then
-        aiming = true
-    end
-end)
-
-UIS.InputEnded:Connect(function(input, gp)
-    if not gp and input.UserInputType == Enum.UserInputType.MouseButton2 then
-        aiming = false
-    end
-end)
-
--- MOBILE: Touch hold anywhere to aim
-UIS.TouchStarted:Connect(function()
-    aiming = true
-end)
-
-UIS.TouchEnded:Connect(function()
-    aiming = false
-end)
-
+-- Kunin ang pinakamalapit na target sa loob ng FOV
 local function getClosestTarget()
-    local mousePos = lastInputPos
-    local closest = nil
     local closestDist = math.huge
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
-            local head = player.Character.Head
-            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-            if humanoid and humanoid.Health > 0 then
-                local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+    local targetPart = nil
+    local mousePos = UIS:GetMouseLocation()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local head = player.Character:FindFirstChild("Head")
+            local hum = player.Character:FindFirstChildOfClass("Humanoid")
+            if head and hum and hum.Health > 0 then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
                 if onScreen then
-                    local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-                    if dist < closestDist and dist < fovRadius then
+                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                    if dist < closestDist and dist <= fovRadius then
                         closestDist = dist
-                        closest = head
+                        targetPart = head
                     end
                 end
             end
         end
     end
-
-    return closest
+    return targetPart
 end
 
-local function aimAt(target)
-    if not target then return end
-    local camPos = Camera.CFrame.Position
-    local newCF = CFrame.new(camPos, target.Position)
-    -- smoothing = 1 is instant lock
-    Camera.CFrame = Camera.CFrame:Lerp(newCF, 1)
+-- Instant snap to target
+local function snapToTarget(target)
+    local screenPos = Camera:WorldToViewportPoint(target.Position)
+    local mousePos = UIS:GetMouseLocation()
+    local dx = screenPos.X - mousePos.X
+    local dy = screenPos.Y - mousePos.Y
+    mousemoverel(dx, dy) -- Instant move!
 end
 
+-- Main loop: AUTO AIMBOT (no right-click needed)
 RunService.RenderStepped:Connect(function()
-    fovCircle.Position = lastInputPos
-
-    if aiming then
-        local target = getClosestTarget()
-        if target then
-            aimAt(target)
-        end
+    fovCircle.Position = UIS:GetMouseLocation()
+    
+    local target = getClosestTarget()
+    if target then
+        snapToTarget(target) -- Awtomatikong susundan kahit walang right-click
     end
 end)
