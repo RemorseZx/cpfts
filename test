@@ -1,94 +1,97 @@
--- Mobile-only simple aimbot (No ESP, smoothing = 1, No GUI)
--- Place as a LocalScript (e.g. StarterPlayerScripts). Designed for touch devices.
+-- MOBILE + PC AIMBOT (No ESP, No GUI, Smoothing = 1)
+-- Put in StarterPlayerScripts or execute in your executor
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
-
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- Only run on touch devices
-if not UIS.TouchEnabled then
-    warn("This script is configured for mobile (touch) only. Touch not detected — script will not run.")
-    return
-end
-
 local aiming = false
-local fovRadius = 300 -- pixels radius from screen center to consider targets
-local smoothing = 1 -- fixed as requested
+local fovRadius = 150
+local smoothing = 1
 
--- Helper: find closest target to screen center within fovRadius
+local lastInputPos = Vector2.new(0, 0)
+
+-- FOV CIRCLE
+local fovCircle = Drawing.new("Circle")
+fovCircle.Thickness = 1
+fovCircle.NumSides = 100
+fovCircle.Filled = false
+fovCircle.Transparency = 1
+fovCircle.Color = Color3.fromRGB(255, 0, 0)
+fovCircle.Visible = true
+fovCircle.Radius = fovRadius
+
+-- Update touch/mouse position
+UIS.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        lastInputPos = Vector2.new(input.Position.X, input.Position.Y)
+    end
+end)
+
+-- PC: Right click hold to aim
+UIS.InputBegan:Connect(function(input, gp)
+    if not gp and input.UserInputType == Enum.UserInputType.MouseButton2 then
+        aiming = true
+    end
+end)
+
+UIS.InputEnded:Connect(function(input, gp)
+    if not gp and input.UserInputType == Enum.UserInputType.MouseButton2 then
+        aiming = false
+    end
+end)
+
+-- MOBILE: Touch hold anywhere to aim
+UIS.TouchStarted:Connect(function()
+    aiming = true
+end)
+
+UIS.TouchEnded:Connect(function()
+    aiming = false
+end)
+
 local function getClosestTarget()
+    local mousePos = lastInputPos
+    local closest = nil
     local closestDist = math.huge
-    local targetPart = nil
-    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 
-    for _, player in pairs(Players:GetPlayers()) do
+    for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
             local head = player.Character.Head
-            local hum = player.Character:FindFirstChildOfClass("Humanoid")
-            if hum and hum.Health > 0 then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
                 if onScreen then
-                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
-                    if dist < closestDist and dist <= fovRadius then
+                    local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+                    if dist < closestDist and dist < fovRadius then
                         closestDist = dist
-                        targetPart = head
+                        closest = head
                     end
                 end
             end
         end
     end
 
-    return targetPart
+    return closest
 end
 
--- Move "mouse" (cursor) toward target on-screen (uses mousemoverel)
-local function moveMouseTowards(target)
+local function aimAt(target)
     if not target then return end
-    local screenPos = Camera:WorldToViewportPoint(target.Position)
-    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-
-    -- compute delta and apply smoothing (smoothing = 1 here)
-    local dx = (screenPos.X - screenCenter.X) / (smoothing == 0 and 0.1 or smoothing)
-    local dy = (screenPos.Y - screenCenter.Y) / (smoothing == 0 and 0.1 or smoothing)
-
-    -- mousemoverel moves by relative pixels; many mobile exploit environments still support it.
-    -- If your environment does not support mousemoverel on mobile, this approach will not work.
-    pcall(function()
-        mousemoverel(dx, dy)
-    end)
+    local camPos = Camera.CFrame.Position
+    local newCF = CFrame.new(camPos, target.Position)
+    -- smoothing = 1 is instant lock
+    Camera.CFrame = Camera.CFrame:Lerp(newCF, 1)
 end
 
--- Touch handlers: single finger hold to aim
-UIS.InputBegan:Connect(function(input, processed)
-    if processed then return end
-    if input.UserInputType == Enum.UserInputType.Touch then
-        -- start aiming on touch begin
-        aiming = true
-    end
-end)
-
-UIS.InputEnded:Connect(function(input, processed)
-    if processed then return end
-    if input.UserInputType == Enum.UserInputType.Touch then
-        -- stop aiming when touch ends
-        aiming = false
-    end
-end)
-
--- Main loop: find closest target to screen center and move cursor while aiming
 RunService.RenderStepped:Connect(function()
+    fovCircle.Position = lastInputPos
+
     if aiming then
         local target = getClosestTarget()
         if target then
-            moveMouseTowards(target)
+            aimAt(target)
         end
     end
-end)
-
--- Cleanup on leaving (optional)
-Players.PlayerRemoving:Connect(function(player)
-    -- no ESP to remove; function kept for completeness
 end)
